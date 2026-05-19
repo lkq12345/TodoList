@@ -1,0 +1,18 @@
+# 构建产物
+bin/
+temp/
+src/release/
+src/Makefile
+src/Makefile.Debug
+src/Makefile.Release
+src/.qmake.stash
+
+# 编译中间文件
+*.o
+*.obj
+moc_*.cpp
+ui_*.h
+
+# IDE 设置
+*.pro.user
+*.pro.user.*
