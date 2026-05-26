@@ -49,8 +49,18 @@
 
 - 已过期 → **红色**
 - 今天截止 → **橙色**
-- 三天内 → **浅橙色**
+- 三天内到期 → **浅橙色**
 - 时间充裕 → 默认色
+
+### 7. 从网络加载任务
+
+点击"从网络加载"按钮，异步请求 JSONPlaceholder API 获取远程待办数据：
+
+- 请求期间显示不确定模式进度条动画
+- 按钮置灰防止重复点击
+- 10 秒超时控制，超时自动取消并提示
+- 错误弹窗显示具体原因（无网络、DNS 解析失败等）
+- 远程数据的优先级轮流分配（低/中/高），截止日期统一设为当前日期 + 7 天
 
 ---
 
@@ -59,16 +69,19 @@
 ### 架构设计
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   Widget (主窗口)                  │
-│    持有: m_model, m_proxy, m_view, m_delegate    │
-├──────────────┬──────────────┬────────────────────┤
-│  QStandardItemModel │ TodoSortModel │ QTreeView │
-│  (数据存储)    │  (排序代理)    │  (可视化)     │
-├──────────────┴──────────────┴────────────────────┤
-│                TodoDelegate                      │
-│          (自定义绘制 & 单元格编辑器)               │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Widget (主窗口)                        │
+│         持有: ui, m_model, m_proxy, m_delegate           │
+├───────────┬──────────────┬──────────────┬────────────────┤
+│ Ui::Widget│QStandardItem │ TodoSortModel│  QTreeView    │
+│ (.ui 布局) │ Model (数据)  │ (排序代理)    │  (可视化)      │
+├───────────┴──────────────┴──────────────┴────────────────┤
+│                    TodoDelegate                          │
+│              (自定义绘制 & 单元格编辑器)                   │
+├─────────────────────────────────────────────────────────┤
+│                    NetworkLoader                         │
+│          QNetworkAccessManager + QTimer 超时控制          │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### 核心模块
@@ -76,10 +89,12 @@
 | 文件 | 职责 |
 |---|---|
 | `main.cpp` | 应用程序入口；安装自定义日志处理器，过滤 libpng iCCP 警告 |
-| `Widget.h / .cpp` | 主窗口：布局搭建、模型初始化、信号/槽连接、增删操作 |
+| `Widget.h / .cpp` | 主窗口：模型/视图/委托初始化、信号/槽连接、增删操作 |
+| `Widget.ui` | UI 布局定义（工具栏、进度条、表格视图），由 Qt Designer 可视化编辑 |
 | `TodoData.h` | 纯头文件，集中管理枚举常量、自定义数据角色和工具函数 |
 | `TodoDelegate.h / .cpp` | 自定义 `QStyledItemDelegate`，控制单元格绘制和编辑器 |
 | `TodoSortModel.h / .cpp` | 排序代理模型，按语义类型重写 `lessThan()` 比较逻辑 |
+| `NetworkLoader.h / .cpp` | 网络请求封装（异步 GET、超时控制、JSON 解析） |
 
 ### Qt Model-View-Delegate 详解
 
@@ -108,7 +123,7 @@
 - **`sizeHint()`** — 强制最小行高 38px
 - **`createEditor()`** — 按列类型创建编辑器（ComboBox / DateEdit / LineEdit）
 - **`setEditorData()`** — 从模型读取数据填充编辑器
-- **`setModelData()`** — 编辑确认后将数据写回模型
+- **`setModelData()`** — 编辑确认后将数据写回模型（同时写入 DisplayRole + 自定义 Role）
 
 #### Proxy Model（排序代理）— `TodoSortModel`
 
@@ -116,6 +131,23 @@
 
 - 不修改源数据，只改变视图呈现顺序
 - 关闭动态排序（`setDynamicSortFilter(false)`），用户显式触发排序
+
+### 网络层 — `NetworkLoader`
+
+封装 `QNetworkAccessManager` 的异步 HTTP 请求生命周期：
+
+- 每次请求前自动取消上一次未完成的请求（防止重复点击叠加请求）
+- `QTimer` 实现超时控制（默认 5 秒，Widget 调用时覆盖为 10 秒）
+- 析构时自动取消请求，避免 use-after-free
+- 信号/槽与 Widget 解耦：只发射 `dataReady(QJsonArray)` 和 `errorOccurred(QString)`
+
+### UI 布局 — `Widget.ui`
+
+使用 Qt Designer 定义界面布局，通过 `setupUi()` 在运行时构建：
+
+- 工具栏（QHBoxLayout）：按钮组 → 固定间距 → 排序控件 → 伸缩弹簧
+- 进度条：默认隐藏，网络加载时显示不确定模式动画
+- 表格视图（QTreeView）：占用剩余全部空间，表头居中、末列自动拉伸
 
 ---
 
@@ -140,7 +172,7 @@ mingw32-make -j4
 ### QMake 配置
 
 ```pro
-QT       += core gui widgets
+QT       += core gui widgets network
 CONFIG   += c++11
 TARGET   = TodoList
 DESTDIR  = $$PWD/../bin
@@ -152,23 +184,27 @@ DESTDIR  = $$PWD/../bin
 
 ```
 TodoList/
-├── README.md
-├── bin/                        # 编译产物
+├── CLAUDE.md                    # Claude Code 项目指令
+├── README.md                    # 项目文档
+├── bin/                         # 编译产物
 │   └── TodoList.exe
-└── src/                        # 源代码
-    ├── TodoList.pro            # qmake 项目文件
-    ├── main.cpp                # 入口点
-    ├── Widget.h / Widget.cpp   # 主窗口
-    ├── Widget.ui               # UI 设计文件（程序化构建，未使用）
-    ├── TodoData.h              # 共享常量与枚举
-    ├── TodoDelegate.h / .cpp   # 自定义委托
-    └── TodoSortModel.h / .cpp  # 排序代理模型
+└── src/                         # 源代码
+    ├── TodoList.pro             # qmake 项目文件
+    ├── main.cpp                 # 入口点
+    ├── Widget.h / Widget.cpp    # 主窗口
+    ├── Widget.ui                # UI 布局定义（Qt Designer）
+    ├── TodoData.h               # 共享常量与枚举
+    ├── TodoDelegate.h / .cpp    # 自定义委托
+    ├── TodoSortModel.h / .cpp   # 排序代理模型
+    └── NetworkLoader.h / .cpp   # 网络请求封装
 ```
 
 ---
 
-## 局限性
+## 已知局限
 
+- **MinGW 链接问题** — 在 Git Bash 中编译时需手动加 `-fno-use-linker-plugin` 绕过 LTO 插件缺失问题
+- **HTTPS 不支持** — Qt 5.12.6 未捆绑 OpenSSL DLL，网络请求使用 HTTP
 - **无持久化** — 数据仅存在于内存中的 `QStandardItemModel`，程序退出后丢失
 - **无搜索 / 过滤** — 不支持按关键词或条件筛选任务
 - **无分类 / 标签** — 不支持对任务分组管理
