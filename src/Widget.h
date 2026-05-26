@@ -3,25 +3,35 @@
 
 #include <QWidget>
 #include <QStandardItemModel>
-#include <QTreeView>
 #include <QSortFilterProxyModel>
 #include "TodoSortModel.h"
-#include <QPushButton>
-#include <QComboBox>
-#include <QLabel>
+#include <QJsonArray>
 
-/* ===================================================================
+/*
+ * ======================================================================
  * Widget.h — 主窗口声明
  *
- * 布局结构（垂直）：
- *   顶部 → 工具栏（固定高度 40px）
- *   中央 → QTreeView（Expanding 策略，伸缩因子 1）
+ * 布局结构（由 Widget.ui 定义）：
+ *   第一层 → 工具栏（固定高度 40px）
+ *             包含：添加、删除、从网络加载、排序控件、状态标签
+ *   第二层 → QProgressBar（默认隐藏，加载时显示）
+ *   第三层 → QTreeView（Expanding 策略，占满剩余空间）
  *
- * 功能按钮：
- *   添加 / 删除 / 排序列选择 / 升降序切换
- * =================================================================== */
+ * 类职责：
+ *   作为整个应用的"控制器"，持有模型、视图、委托、网络加载器，
+ *   负责协调它们之间的信号/槽连接和操作流程。
+ *
+ * 界面元素的创建和布局由 Widget.ui 文件负责，通过 setupUi() 构建。
+ * ======================================================================
+ */
 
+// 前置声明
 class TodoDelegate;
+class NetworkLoader;
+
+namespace Ui {
+    class Widget;
+}
 
 class Widget : public QWidget
 {
@@ -29,28 +39,29 @@ class Widget : public QWidget
 
 public:
     explicit Widget(QWidget *parent = nullptr);
+    ~Widget();
 
 private slots:
-    void addItem();         // 弹出对话框添加新任务
-    void deleteItem();      // 删除当前选中行
-    void toggleSortOrder(); // 切换升序 / 降序
+    void addItem();
+    void deleteItem();
+    void toggleSortOrder();
+    void onLoadFromNetwork();
+    void onNetworkDataReady(const QJsonArray &data);
+    void onNetworkError(const QString &message);
 
 private:
-    // ---- 工具方法 ----
-    void updateSortInfo();      // 更新排序状态标签
+    void updateSortInfo();
 
-    // ---- 模型 / 视图 / 委托 ----
-    QTreeView            *m_view;
-    QStandardItemModel   *m_model;       // 源模型（4 列）
-    QSortFilterProxyModel *m_proxy;      // 排序代理模型
-    TodoDelegate         *m_delegate;    // 自定义绘制 & 编辑器
+    // ---- 界面（由 Widget.ui / setupUi 创建，通过 ui-> 访问） ----
+    Ui::Widget *ui;
 
-    // ---- 工具栏控件 ----
-    QPushButton *m_btnAdd;
-    QPushButton *m_btnDelete;
-    QComboBox   *m_cmbColumn;   // 选择排序列
-    QPushButton *m_btnOrder;    // 升序 / 降序 切换
-    QLabel      *m_lblSortInfo; // 显示当前排序状态
+    // ---- 模型 / 排序代理 / 委托（代码中手动创建） ----
+    QStandardItemModel   *m_model;       // 源模型（4 列 n 行的数据存储）
+    TodoSortModel        *m_proxy;       // 排序代理模型（架在源模型和视图之间）
+    TodoDelegate         *m_delegate;    // 自定义委托（控制绘制和编辑器）
+
+    // ---- 网络加载 ----
+    NetworkLoader *m_networkLoader;      // HTTP 网络请求封装
 };
 
 #endif // WIDGET_H
